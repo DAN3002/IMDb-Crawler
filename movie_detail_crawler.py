@@ -91,6 +91,7 @@ class MovieDetailCrawler:
 				'runtime_minutes': runtime.get('seconds', 0) // 60 if runtime.get('seconds') else 0,
 				'plot': original_data.get('plot', ''),
 				'primary_image': original_data.get('primary_image', ''),
+				'link': f"https://www.imdb.com/title/{movie_id}",
 				'last_updated': datetime.now().isoformat()
 			}
 			
@@ -188,6 +189,33 @@ class MovieDetailCrawler:
 			self.logger.info(f"Progress saved to {output_file}")
 		except Exception as e:
 			self.logger.error(f"Error saving progress: {str(e)}")
+
+	def _extract_movie_data(self, movie):
+		try:
+			# Get existing movie data
+			movie_data = {
+				'id': movie['id'],
+				'name': movie['name'],
+				'original_title': movie['original_title'],
+				'year': movie['year'],
+				'rating': movie['rating'],
+				'votes': movie['votes'],
+				'user_reviews_count': movie['user_reviews_count'],
+				'critic_reviews_count': movie['critic_reviews_count'],
+				'countries': movie['countries'],
+				'certificate': movie['certificate'],
+				'popularity_rank': movie['popularity_rank'],
+				'genres': movie['genres'],
+				'runtime_minutes': movie['runtime_minutes'],
+				'plot': movie['plot'],
+				'primary_image': movie['primary_image'],
+				'link': f"https://www.imdb.com/title/{movie['id']}",
+				'last_updated': datetime.now().isoformat()
+			}
+			return movie_data
+		except Exception as e:
+			self.logger.error(f"Error extracting movie data: {str(e)}")
+			return None
 
 def main():
 	# Create required directories

@@ -5,14 +5,14 @@ def filter_movies(input_file, output_file):
     with open(input_file, 'r', encoding='utf-8') as f:
         movies = json.load(f)
 
-    # Filter movies based on criteria:
+    # Filter movies based on criteria and add IMDB link
     # - votes > 100
     # - country is only Vietnam
     # - user_reviews_count >= 5
     filtered_movies = [
-        movie for movie in movies
+        {**movie, 'link': f"https://www.imdb.com/title/{movie['id']}"}
+        for movie in movies
         if movie['votes'] > 100
-        # if True 
         and movie['countries'] == ['Vietnam']
         and movie['user_reviews_count'] >= 5
     ]
