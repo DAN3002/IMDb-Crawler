@@ -1,5 +1,6 @@
 import json
 import time
+import os
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -40,26 +41,33 @@ class MovieDetailCrawler:
 				print(f"No pageProps found for movie {movie_id}")
 				return None
 			
+			# Get both data sources
 			above_fold_data = page_props.get('aboveTheFoldData')
-			if not above_fold_data:
-				print(f"No aboveTheFoldData found for movie {movie_id}")
+			main_column_data = page_props.get('mainColumnData')
+			
+			if not above_fold_data or not main_column_data:
+				print(f"Missing required data sections for movie {movie_id}")
 				return None
 			
-			# Safely get nested data
+			# Safely get nested data from aboveTheFoldData
 			title_text = above_fold_data.get('titleText') or {}
+			original_title_text = above_fold_data.get('originalTitleText') or {}
 			release_year = above_fold_data.get('releaseYear') or {}
 			ratings_summary = above_fold_data.get('ratingsSummary') or {}
 			reviews = above_fold_data.get('reviews') or {}
 			critic_reviews = above_fold_data.get('criticReviews') or {}
-			countries_data = above_fold_data.get('countriesOfOrigin') or {}
 			certificate = above_fold_data.get('certificate') or {}
 			meter_ranking = above_fold_data.get('meterRanking') or {}
 			runtime = above_fold_data.get('runtime') or {}
+			
+			# Get countries from mainColumnData
+			countries_data = main_column_data.get('countriesOfOrigin') or {}
 			
 			# Extract required information with safe fallbacks
 			details = {
 				'id': movie_id,
 				'name': title_text.get('text', ''),
+				'original_title': original_title_text.get('text', ''),
 				'year': release_year.get('year', ''),
 				'rating': ratings_summary.get('aggregateRating'),
 				'votes': ratings_summary.get('voteCount', 0),
@@ -72,7 +80,6 @@ class MovieDetailCrawler:
 				],
 				'certificate': certificate.get('rating', ''),
 				'popularity_rank': meter_ranking.get('currentRank'),
-				'rating_distribution': ratings_summary.get('voteDistribution', []),
 				'genres': original_data.get('genres', []),
 				'runtime_minutes': runtime.get('seconds', 0) // 60 if runtime.get('seconds') else 0,
 				'plot': original_data.get('plot', ''),
@@ -87,6 +94,8 @@ class MovieDetailCrawler:
 				details['votes'] = original_data.get('votes')
 			if not details['name']:
 				details['name'] = original_data.get('title', '')
+			if not details['original_title']:
+				details['original_title'] = details['name']
 			
 			# Validate required fields
 			if not details['id'] or not details['name']:
@@ -107,7 +116,7 @@ class MovieDetailCrawler:
 					'json_data': json_data if 'json_data' in locals() else None,
 					'above_fold_data': above_fold_data if 'above_fold_data' in locals() else None
 				}
-				with open(f'error_{movie_id}_debug.json', 'w', encoding='utf-8') as f:
+				with open(f'error_logs/error_{movie_id}_debug.json', 'w', encoding='utf-8') as f:
 					json.dump(debug_data, f, ensure_ascii=False, indent=4)
 			except:
 				pass
@@ -166,6 +175,17 @@ class MovieDetailCrawler:
 			print(f"Error saving progress: {str(e)}")
 
 def main():
+	# Check if the error_logs directory exists, create it if it doesn't and output the error logs to the file
+	error_logs_dir = './error_logs'
+	if not os.path.exists(error_logs_dir):
+		os.makedirs(error_logs_dir)
+  
+	# Check if the output directory exists, create it if it doesn't
+	output_dir = './output'
+	if not os.path.exists(output_dir):
+		os.makedirs(output_dir)
+
+
 	crawler = MovieDetailCrawler()
 	try:
 		crawler.process_movies_file()
