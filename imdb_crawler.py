@@ -11,6 +11,7 @@ from selenium.webdriver.chrome.options import Options
 
 class IMDbCrawler:
     def __init__(self):
+        self.PAGE_SIZE = 100
         self.base_url = "https://caching.graphql.imdb.com/"
         self.headers = {
             'authority': 'caching.graphql.imdb.com',
@@ -23,10 +24,11 @@ class IMDbCrawler:
             # Add required cookies
             'cookie': 'session-id=xxx; session-id-time=xxx; ubid-main=xxx',
         }
-        self.output_folder = 'imdb_data'
+        self.output_folder = './output'
         if not os.path.exists(self.output_folder):
             os.makedirs(self.output_folder)
         self.all_movies = []
+        self.error_count = 0  # Add error counter
         # Initialize session to maintain cookies
         self.session = requests.Session()
         self._init_session()
@@ -67,8 +69,9 @@ class IMDbCrawler:
             print(f"Error initializing session: {str(e)}")
 
     def get_vietnamese_movies(self):
-        after_token = None  # Start with no token for first page
+        after_token = None
         has_next = True
+        page_errors = 0  # Track page-level errors
         
         while has_next:
             try:
@@ -76,6 +79,7 @@ class IMDbCrawler:
                 movies_page = self._fetch_movies_page(after_token)
                 
                 if not movies_page:
+                    page_errors += 1
                     print("Failed to fetch page, retrying...")
                     time.sleep(5)
                     continue
@@ -95,12 +99,11 @@ class IMDbCrawler:
                         print(f"Found movie: {movie_data['title']} ({movie_data['id']})")
                 
                 print(f"Successfully processed {valid_movies} out of {len(edges)} movies on this page")
+                print(f"Total movies collected: {len(self.all_movies)}")
                 
                 # Update pagination info
                 has_next = page_info.get('hasNextPage', False)
                 after_token = page_info.get('endCursor')
-                
-                print(f"Total movies collected: {len(self.all_movies)}")
                 
                 # Save progress after each page
                 self._save_progress()
@@ -109,16 +112,20 @@ class IMDbCrawler:
                 time.sleep(2)
                 
             except Exception as e:
-                print(f"Error processing page: {str(e)}")
+                page_errors += 1
                 time.sleep(5)
                 continue
         
+        # Print error statistics at the end
+        print(f"\nCrawling Statistics:")
+        print(f"Total page errors: {page_errors}")
+        print(f"Total movie processing errors: {self.error_count}")
         return self.all_movies
 
     def _fetch_movies_page(self, after_token=None):
         # Base variables
         variables = {
-            "first": 100,
+            "first": self.PAGE_SIZE,
             "locale": "vi-VN",
             "originCountryConstraint": {
                 "anyPrimaryCountries": ["VN"]
@@ -185,17 +192,17 @@ class IMDbCrawler:
     def _extract_movie_data(self, movie_edge):
         try:
             if not movie_edge or 'node' not in movie_edge:
-                print("Invalid movie edge data")
+                self.error_count += 1
                 return None
             
             node = movie_edge['node']
             if not node:
-                print("Empty node data")
+                self.error_count += 1
                 return None
             
             title = node.get('title', {})
             if not title:
-                print(f"No title data found in node: {node}")
+                self.error_count += 1
                 return None
 
             # Extract data with safe fallbacks
@@ -203,8 +210,9 @@ class IMDbCrawler:
             release_year = title.get('releaseYear', {})
             ratings_summary = title.get('ratingsSummary', {})
             runtime = title.get('runtime', {})
-            genres_data = title.get('genres', {})
+            genres_data = title.get('titleGenres', {})
             plot_data = title.get('plot', {})
+            primary_image = title.get('primaryImage')
             
             # Build movie data with careful extraction
             movie_data = {
@@ -216,15 +224,15 @@ class IMDbCrawler:
                 'runtime_minutes': runtime.get('seconds', 0) // 60 if runtime and runtime.get('seconds') else 0,
                 'genres': [],
                 'plot': '',
-                'primary_image': title.get('primaryImage', {}).get('url', '')
+                'primary_image': primary_image.get('url', '') if primary_image else ''
             }
             
-            # Safely extract genres
+            # Safely extract genres with new format
             if genres_data and 'genres' in genres_data:
                 movie_data['genres'] = [
-                    genre.get('text', '') 
-                    for genre in genres_data['genres'] 
-                    if genre and isinstance(genre, dict)
+                    genre.get('genre', {}).get('text', '')
+                    for genre in genres_data['genres']
+                    if genre and isinstance(genre, dict) and 'genre' in genre
                 ]
             
             # Safely extract plot
@@ -233,24 +241,22 @@ class IMDbCrawler:
                 if plot_text:
                     movie_data['plot'] = plot_text.get('plainText', '')
             
-            # Debug print for empty required fields
+            # Check for missing required fields without printing
             if not movie_data['id'] or not movie_data['title']:
-                print(f"Warning: Missing required data - ID: {movie_data['id']}, Title: {movie_data['title']}")
-                print(f"Original node data: {json.dumps(node, indent=2)}")
+                self.error_count += 1
                 return None
             
             return movie_data
             
         except Exception as e:
-            print(f"Error extracting movie data: {str(e)}")
-            print(f"Problematic movie_edge: {json.dumps(movie_edge, indent=2)}")
+            self.error_count += 1
             return None
 
     def _save_progress(self):
         """Save the current progress to a file"""
         try:
             with open('./output/vietnamese_movies_progress.json', 'w', encoding='utf-8') as f:
-                json.dump(self.all_movies, f, ensure_ascii=False, indent=2)
+                json.dump(self.all_movies, f, ensure_ascii=False, indent=4)
         except Exception as e:
             print(f"Error saving progress: {str(e)}")
 
@@ -260,7 +266,7 @@ def main():
     
     # Save final results
     with open('./output/vietnamese_movies.json', 'w', encoding='utf-8') as f:
-        json.dump(movies, f, ensure_ascii=False, indent=2)
+        json.dump(movies, f, ensure_ascii=False, indent=4)
     
     print(f"\nCrawling completed. Total movies found: {len(movies)}")
 
