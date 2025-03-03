@@ -83,6 +83,7 @@ class IMDbCrawler:
 		after_token = None
 		has_next = True
 		page_errors = 0  # Track page-level errors
+		max_retries = 3  # Maximum number of retries per page
 		
 		self.logger.info("Starting to fetch Vietnamese movies...")
 		
@@ -93,9 +94,15 @@ class IMDbCrawler:
 				
 				if not movies_page:
 					page_errors += 1
-					self.logger.warning("Failed to fetch page, retrying...")
+					if page_errors >= max_retries:
+						self.logger.error(f"Failed to fetch page after {max_retries} attempts. Stopping crawl.")
+						break
+					self.logger.warning(f"Failed to fetch page, retry {page_errors}/{max_retries}...")
 					time.sleep(5)
 					continue
+				
+				# Reset page errors on successful fetch
+				page_errors = 0
 				
 				# Extract data from the response
 				search_results = movies_page.get('data', {}).get('advancedTitleSearch', {})
@@ -114,9 +121,16 @@ class IMDbCrawler:
 				self.logger.info(f"Successfully processed {valid_movies} out of {len(edges)} movies on this page")
 				self.logger.info(f"Total movies collected: {len(self.all_movies)}")
 				
-				# Update pagination info
-				has_next = page_info.get('hasNextPage', False)
+				# Update pagination info - explicitly check hasNextPage
+				has_next = bool(page_info.get('hasNextPage', False))
+				if not has_next:
+					self.logger.info("Reached last page. Stopping crawl.")
+					break
+				
 				after_token = page_info.get('endCursor')
+				if not after_token:
+					self.logger.warning("No endCursor found for next page. Stopping crawl.")
+					break
 				
 				# Save progress after each page
 				self._save_progress()
@@ -126,6 +140,9 @@ class IMDbCrawler:
 				
 			except Exception as e:
 				page_errors += 1
+				if page_errors >= max_retries:
+					self.logger.error(f"Too many errors ({page_errors}). Stopping crawl.")
+					break
 				self.logger.error(f"Error processing page: {str(e)}")
 				time.sleep(5)
 				continue
@@ -144,6 +161,7 @@ class IMDbCrawler:
 			"originCountryConstraint": {
 				"anyPrimaryCountries": ["VN"]
 			},
+			"titleTypeConstraint":{"anyTitleTypeIds":["movie"],"excludeTitleTypeIds":[]},
 			"sortBy": "POPULARITY",
 			"sortOrder": "ASC"
 		}

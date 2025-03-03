@@ -11,7 +11,7 @@ def setup_logger(name, log_file):
 	
 	# Create logger
 	logger = logging.getLogger(name)
-	logger.setLevel(logging.INFO)
+	logger.setLevel(logging.DEBUG)
 	
 	# Create handlers
 	file_handler = logging.FileHandler(log_file, encoding='utf-8')
