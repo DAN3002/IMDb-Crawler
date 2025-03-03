@@ -8,9 +8,14 @@ import os
 from urllib.parse import quote, unquote
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from utils.logger import setup_logger
 
 class IMDbCrawler:
     def __init__(self):
+        # Setup logger
+        log_file = f'./logs/imdb_crawler_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+        self.logger = setup_logger('IMDbCrawler', log_file)
+        
         self.PAGE_SIZE = 100
         self.base_url = "https://caching.graphql.imdb.com/"
         self.headers = {
@@ -27,30 +32,35 @@ class IMDbCrawler:
         self.output_folder = './output'
         if not os.path.exists(self.output_folder):
             os.makedirs(self.output_folder)
+            self.logger.info(f"Created output directory: {self.output_folder}")
         self.all_movies = []
         self.error_count = 0  # Add error counter
         # Initialize session to maintain cookies
+        self.logger.info("Initializing session...")
         self.session = requests.Session()
         self._init_session()
 
     def _init_session(self):
         """Initialize session with browser automation"""
         try:
-            # Setup Chrome options
+            self.logger.info("Setting up Chrome for session initialization...")
             chrome_options = Options()
             chrome_options.add_argument('--headless')  # Run in headless mode
             
             # Initialize browser
             driver = webdriver.Chrome(options=chrome_options)
+            self.logger.info("Chrome driver initialized")
             
             # Visit IMDb
             driver.get('https://www.imdb.com/')
+            self.logger.info("Visiting IMDb homepage")
             
             # Wait for cookies to be set
             time.sleep(5)
             
             # Get cookies from browser
             cookies = driver.get_cookies()
+            self.logger.info(f"Retrieved {len(cookies)} cookies")
             
             # Add cookies to session
             for cookie in cookies:
@@ -64,23 +74,26 @@ class IMDbCrawler:
             
             # Close browser
             driver.quit()
+            self.logger.info("Session initialization completed successfully")
             
         except Exception as e:
-            print(f"Error initializing session: {str(e)}")
+            self.logger.error(f"Error initializing session: {str(e)}")
 
     def get_vietnamese_movies(self):
         after_token = None
         has_next = True
         page_errors = 0  # Track page-level errors
         
+        self.logger.info("Starting to fetch Vietnamese movies...")
+        
         while has_next:
             try:
-                print(f"\nFetching page with after_token: {after_token}")
+                self.logger.info(f"Fetching page with after_token: {after_token}")
                 movies_page = self._fetch_movies_page(after_token)
                 
                 if not movies_page:
                     page_errors += 1
-                    print("Failed to fetch page, retrying...")
+                    self.logger.warning("Failed to fetch page, retrying...")
                     time.sleep(5)
                     continue
                 
@@ -96,10 +109,10 @@ class IMDbCrawler:
                     if movie_data:
                         self.all_movies.append(movie_data)
                         valid_movies += 1
-                        print(f"Found movie: {movie_data['title']} ({movie_data['id']})")
+                        self.logger.info(f"Found movie: {movie_data['title']} ({movie_data['id']})")
                 
-                print(f"Successfully processed {valid_movies} out of {len(edges)} movies on this page")
-                print(f"Total movies collected: {len(self.all_movies)}")
+                self.logger.info(f"Successfully processed {valid_movies} out of {len(edges)} movies on this page")
+                self.logger.info(f"Total movies collected: {len(self.all_movies)}")
                 
                 # Update pagination info
                 has_next = page_info.get('hasNextPage', False)
@@ -113,13 +126,14 @@ class IMDbCrawler:
                 
             except Exception as e:
                 page_errors += 1
+                self.logger.error(f"Error processing page: {str(e)}")
                 time.sleep(5)
                 continue
         
         # Print error statistics at the end
-        print(f"\nCrawling Statistics:")
-        print(f"Total page errors: {page_errors}")
-        print(f"Total movie processing errors: {self.error_count}")
+        self.logger.info("\nCrawling Statistics:")
+        self.logger.info(f"Total page errors: {page_errors}")
+        self.logger.info(f"Total movie processing errors: {self.error_count}")
         return self.all_movies
 
     def _fetch_movies_page(self, after_token=None):
@@ -170,39 +184,42 @@ class IMDbCrawler:
                     page_info = search_results.get('pageInfo', {})
                     
                     # Print pagination details for debugging
-                    print(f"Has next page: {page_info.get('hasNextPage', False)}")
-                    print(f"End cursor: {page_info.get('endCursor', None)}")
+                    self.logger.debug(f"Has next page: {page_info.get('hasNextPage', False)}")
+                    self.logger.debug(f"End cursor: {page_info.get('endCursor', None)}")
                     
                     return data
             else:
-                print(f"Error: API request failed with status code {response.status_code}")
-                print(response.text)
+                self.logger.error(f"Error: API request failed with status code {response.status_code}")
+                self.logger.error(response.text)
                 
                 if "challenge-container" in response.text:
-                    print("Detected challenge page, reinitializing session...")
+                    self.logger.warning("Detected challenge page, reinitializing session...")
                     self._init_session()
                     time.sleep(5)
             
             return None
             
         except Exception as e:
-            print(f"Error making API request: {str(e)}")
+            self.logger.error(f"Error making API request: {str(e)}")
             return None
 
     def _extract_movie_data(self, movie_edge):
         try:
             if not movie_edge or 'node' not in movie_edge:
                 self.error_count += 1
+                self.logger.warning("Invalid movie edge data")
                 return None
             
             node = movie_edge['node']
             if not node:
                 self.error_count += 1
+                self.logger.warning("Empty node data")
                 return None
             
             title = node.get('title', {})
             if not title:
                 self.error_count += 1
+                self.logger.warning("No title data found in node")
                 return None
 
             # Extract data with safe fallbacks
@@ -244,31 +261,41 @@ class IMDbCrawler:
             # Check for missing required fields without printing
             if not movie_data['id'] or not movie_data['title']:
                 self.error_count += 1
+                self.logger.warning(f"Missing required data for movie {movie_data.get('id', 'unknown')}")
                 return None
             
             return movie_data
             
         except Exception as e:
             self.error_count += 1
+            self.logger.error(f"Error extracting movie data: {str(e)}")
             return None
 
     def _save_progress(self):
         """Save the current progress to a file"""
         try:
-            with open('./output/vietnamese_movies_progress.json', 'w', encoding='utf-8') as f:
+            progress_file = f'{self.output_folder}/vietnamese_movies_progress.json'
+            with open(progress_file, 'w', encoding='utf-8') as f:
                 json.dump(self.all_movies, f, ensure_ascii=False, indent=4)
+            self.logger.info(f"Progress saved to {progress_file}")
         except Exception as e:
-            print(f"Error saving progress: {str(e)}")
+            self.logger.error(f"Error saving progress: {str(e)}")
 
 def main():
+    # Create required directories
+    for directory in ['./error_logs', './output', './logs']:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+            
     crawler = IMDbCrawler()
     movies = crawler.get_vietnamese_movies()
     
     # Save final results
-    with open('./output/vietnamese_movies.json', 'w', encoding='utf-8') as f:
+    output_file = './output/vietnamese_movies.json'
+    with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(movies, f, ensure_ascii=False, indent=4)
     
-    print(f"\nCrawling completed. Total movies found: {len(movies)}")
+    crawler.logger.info(f"Crawling completed. Total movies found: {len(movies)}")
 
 if __name__ == "__main__":
     main() 

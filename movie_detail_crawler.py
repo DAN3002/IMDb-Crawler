@@ -7,9 +7,14 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from datetime import datetime
+from utils.logger import setup_logger
 
 class MovieDetailCrawler:
 	def __init__(self):
+		# Setup logger
+		log_file = f'./logs/movie_detail_crawler_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+		self.logger = setup_logger('MovieDetailCrawler', log_file)
+		
 		# Setup Chrome options
 		self.chrome_options = Options()
 		# self.chrome_options.add_argument('--headless')  # Run in headless mode
@@ -17,14 +22,16 @@ class MovieDetailCrawler:
 		self.chrome_options.add_argument('--no-sandbox')
 		self.chrome_options.add_argument('--disable-dev-shm-usage')
 		
-		# Initialize the driver
+		self.logger.info("Initializing Chrome driver...")
 		self.driver = webdriver.Chrome(options=self.chrome_options)
 		self.wait = WebDriverWait(self.driver, 10)
+		self.logger.info("Chrome driver initialized successfully")
 
 	def get_movie_details(self, movie_id, original_data):
 		try:
 			# Construct IMDb movie URL
 			url = f"https://www.imdb.com/title/{movie_id}/"
+			self.logger.info(f"Fetching details for movie {movie_id} from {url}")
 			self.driver.get(url)
 			
 			# Wait for and find the NEXT_DATA script tag
@@ -103,11 +110,11 @@ class MovieDetailCrawler:
 				print(f"Current details: {json.dumps(details, indent=2)}")
 				return None
 			
-			print(f"Successfully extracted data for {details['name']} ({details['year']})")
+			self.logger.info(f"Successfully extracted data for {details['name']} ({details['year']})")
 			return details
 			
 		except Exception as e:
-			print(f"Error fetching details for movie {movie_id}: {str(e)}")
+			self.logger.error(f"Error fetching details for movie {movie_id}: {str(e)}")
 			# Save both error and data for debugging
 			try:
 				debug_data = {
@@ -116,39 +123,45 @@ class MovieDetailCrawler:
 					'json_data': json_data if 'json_data' in locals() else None,
 					'above_fold_data': above_fold_data if 'above_fold_data' in locals() else None
 				}
-				with open(f'error_logs/error_{movie_id}_debug.json', 'w', encoding='utf-8') as f:
+				error_file = f'error_logs/error_{movie_id}_debug.json'
+				with open(error_file, 'w', encoding='utf-8') as f:
 					json.dump(debug_data, f, ensure_ascii=False, indent=4)
-			except:
-				pass
+				self.logger.info(f"Error details saved to {error_file}")
+			except Exception as debug_error:
+				self.logger.error(f"Failed to save debug data: {str(debug_error)}")
 			return None
 
 	def process_movies_file(self, input_file='./output/vietnamese_movies.json', 
 						  output_file='./output/movie_details.json'):
 		try:
+			self.logger.info(f"Starting to process movies from {input_file}")
 			# Read input file
 			with open(input_file, 'r', encoding='utf-8') as f:
 				movies = json.load(f)
 			
 			detailed_movies = []
 			total_movies = len(movies)
+			self.logger.info(f"Found {total_movies} movies to process")
 			
 			print(f"Processing {total_movies} movies...")
 			
 			for idx, movie in enumerate(movies, 1):
 				movie_id = movie.get('id')
 				if not movie_id:
+					self.logger.warning(f"Skipping movie at index {idx}: No movie ID found")
 					continue
 				
-				print(f"\nProcessing movie {idx}/{total_movies}: {movie_id}")
+				self.logger.info(f"Processing movie {idx}/{total_movies}: {movie_id}")
 				
 				details = self.get_movie_details(movie_id, movie)
 				if details:
 					detailed_movies.append(details)
+					self.logger.info(f"Successfully processed movie: {details['name']}")
 				
 				# Save progress periodically
 				if idx % 5 == 0:
 					self._save_progress(detailed_movies, output_file)
-					print(f"Progress saved: {len(detailed_movies)}/{idx} movies processed")
+					self.logger.info(f"Progress saved: {len(detailed_movies)}/{idx} movies processed")
 				
 				# Rate limiting
 				time.sleep(2)
@@ -156,41 +169,37 @@ class MovieDetailCrawler:
 			# Save final results
 			self._save_progress(detailed_movies, output_file)
 			
-			print(f"\nProcessing completed. Found {len(detailed_movies)} movies.")
+			self.logger.info(f"Processing completed. Found {len(detailed_movies)} movies.")
 			return detailed_movies
 			
 		except Exception as e:
-			print(f"Error processing movies file: {str(e)}")
+			self.logger.error(f"Error processing movies file: {str(e)}")
 			return []
 		finally:
 			# Clean up
 			self.driver.quit()
+			self.logger.info("Chrome driver closed")
 
 	def _save_progress(self, movies, output_file):
 		"""Save current progress to file"""
 		try:
 			with open(output_file, 'w', encoding='utf-8') as f:
 				json.dump(movies, f, ensure_ascii=False, indent=4)
+			self.logger.info(f"Progress saved to {output_file}")
 		except Exception as e:
-			print(f"Error saving progress: {str(e)}")
+			self.logger.error(f"Error saving progress: {str(e)}")
 
 def main():
-	# Check if the error_logs directory exists, create it if it doesn't and output the error logs to the file
-	error_logs_dir = './error_logs'
-	if not os.path.exists(error_logs_dir):
-		os.makedirs(error_logs_dir)
+	# Create required directories
+	for directory in ['./error_logs', './output', './logs']:
+		if not os.path.exists(directory):
+			os.makedirs(directory)
   
-	# Check if the output directory exists, create it if it doesn't
-	output_dir = './output'
-	if not os.path.exists(output_dir):
-		os.makedirs(output_dir)
-
-
 	crawler = MovieDetailCrawler()
 	try:
 		crawler.process_movies_file()
 	except Exception as e:
-		print(f"Main process error: {str(e)}")
+		crawler.logger.error(f"Main process error: {str(e)}")
 	finally:
 		if hasattr(crawler, 'driver'):
 			crawler.driver.quit()
